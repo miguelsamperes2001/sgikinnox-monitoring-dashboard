@@ -1,37 +1,42 @@
-cd streamlit_app/
-git init
-git add .
-git commit -m "Initial commit - Cerebro SGI v2"
-git remote add origin https://github.com/TU-USUARIO/cerebro-sgi-kinnox.git
-git push -u origin main
-```
+import streamlit as st
+import pandas as pd
+import time
 
-### 2️⃣ Deploy en Streamlit Cloud (3 minutos)
-1. https://share.streamlit.io
-2. New app → selecciona tu repo
-3. Main file: `app.py`
-4. Deploy!
+# --- CONFIGURACIÓN DE PÁGINA ---
+st.set_page_config(page_title="Cerebro SGI v2 - Kinnox", layout="wide")
 
-**URL resultante:** `https://tu-usuario-cerebro-sgi-kinnox.streamlit.app`
+# --- ESTADO DE LA APP (DataStore) ---
+if 'demo_mode' not in st.session_state:
+    st.session_state['demo_mode'] = True
 
-### 3️⃣ Modo demo vs producción
-- **Ahora:** Modo DEMO automático (datos simulados, sin PLC)
-- **En planta:** Cambiar `demo_mode = False` + configurar IP del PLC
+# --- BARRA LATERAL (Control de Planta) ---
+st.sidebar.title("⚙️ Configuración")
+modo = st.sidebar.selectbox("Modo de Operación", ["DEMO (Simulado)", "PRODUCCIÓN (PLC)"])
+st.session_state['demo_mode'] = (modo == "DEMO (Simulado)")
 
----
+# --- CUERPO PRINCIPAL ---
+st.title("🧠 Cerebro SGI v2: Monitoreo Kinnox")
+st.info(f"Sistema operando en: **{modo}**")
 
-## ⚙️ Arquitectura técnica
-```
-Streamlit Cloud / Local
-    ↓ (Streamlit multi-page app)
-app.py (home)
-    ├─ DataStore (estado compartido en session_state)
-    ├─ ModbusClient (lectura/escritura PLC)
-    └─ ControlLogic (algoritmo predictivo)
-         ↓
-pages/
-    ├─ 01_Operativo.py
-    ├─ 02_Control_N2.py  ✅ COMPLETADO
-    ├─ 03_Financiero.py
-    ├─ 04_Modbus.py
-    └─ 05_Alertas.py
+# Columnas con métricas clave para SGI
+col1, col2, col3 = st.columns(3)
+
+with col1:
+    st.metric("Ahorro Acumulado (Leasing)", "$12,450 USD", "+5.2%")
+with col2:
+    st.metric("Eficiencia de Producción", "94%", "-1.5%")
+with col3:
+    st.metric("Estado PLC (Modbus)", "Conectado" if not st.session_state['demo_mode'] else "Simulado")
+
+st.divider()
+
+# Gráfico de ejemplo
+st.subheader("📊 Monitoreo de Flujo de Ahorros")
+datos_demo = pd.DataFrame({
+    'Semana': ['S1', 'S2', 'S3', 'S4'],
+    'Producción': [100, 120, 115, 130],
+    'Ahorro': [20, 25, 23, 28]
+})
+st.line_chart(datos_demo.set_index('Semana'))
+
+st.success("✅ Sistema de control predictivo activo.")
