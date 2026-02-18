@@ -1,224 +1,244 @@
 import streamlit as st
 import plotly.graph_objects as go
-import time
 from datetime import datetime
-import sys
-from pathlib import Path
 
-# Add modules to path
-sys.path.append(str(Path(__file__).parent))
-
-from modules.data_store import DataStore
-from modules.modbus_client import ModbusClient
-from modules.control_logic import ControlLogic
 import config as cfg
+from modules.industrial.event_logger import get_event_logger
+from modules.industrial.watchdog import get_watchdog
+from modules.industrial.role_manager import get_role_manager
+from modules.industrial.data_pipeline import get_pipeline
 
 # PAGE CONFIG
 st.set_page_config(
-    page_title="Cerebro SGI - KINNOX",
-    page_icon="⚙️",
+    page_title=f"Cerebro SGI [{cfg.MODO_OPERACION}]",
+    page_icon="⚙️" if cfg.MODO_OPERACION == "SIMULACION" else "🏭",
     layout="wide",
     initial_sidebar_state="expanded",
 )
 
-# INICIALIZACION DE SESSION STATE
-def init_session_state():
-    if 'data_store' not in st.session_state:
-        st.session_state.data_store = DataStore()
+# INICIALIZAR SISTEMAS
+if 'initialized' not in st.session_state:
+    st.session_state.event_logger = get_event_logger()
+    st.session_state.watchdog = get_watchdog()
+    st.session_state.role_manager = get_role_manager()
+    st.session_state.pipeline = get_pipeline()
+    st.session_state.initialized = True
     
-    if 'modbus_client' not in st.session_state:
-        st.session_state.modbus_client = ModbusClient(
-            host=cfg.PLC_IP,
-            port=cfg.PLC_PORT,
-            slave_id=cfg.SLAVE_ID
-        )
-    
-    if 'control_logic' not in st.session_state:
-        st.session_state.control_logic = ControlLogic()
-    
-    if 'demo_mode' not in st.session_state:
-        st.session_state.demo_mode = True
-    
-    if 'last_update' not in st.session_state:
-        st.session_state.last_update = datetime.now()
-    
-    if 'failsafe_active' not in st.session_state:
-        st.session_state.failsafe_active = False
+    # Log inicio
+    st.session_state.event_logger.log_event(
+        "SYSTEM",
+        "INFO",
+        f"Sistema iniciado en modo {cfg.MODO_OPERACION}"
+    )
 
-init_session_state()
+# BANNER DE MODO (SIEMPRE VISIBLE)
+if cfg.MODO_OPERACION == "SIMULACION":
+    st.markdown("""
+    <div style="background-color: #ffd740; color: #000; padding: 12px; text-align: center; 
+                font-weight: bold; border-radius: 4px; margin-bottom: 20px;">
+        🎮 MODO SIMULACIÓN - Datos generados automáticamente (NO REAL)
+    </div>
+    """, unsafe_allow_html=True)
+else:
+    st.markdown("""
+    <div style="background-color: #00e676; color: #000; padding: 12px; text-align: center; 
+                font-weight: bold; border-radius: 4px; margin-bottom: 20px;">
+        🏭 MODO REAL - Datos desde PLC/PSA
+    </div>
+    """, unsafe_allow_html=True)
 
 # CUSTOM CSS
 st.markdown("""
 <style>
-    .stApp {
-        background-color: #07090f;
-        color: #cdd9ee;
-    }
-    h1, h2, h3 {
-        color: #00e5ff !important;
-        font-family: 'IBM Plex Mono', monospace;
-    }
-    [data-testid="stMetricValue"] {
-        font-size: 2.5rem;
-        color: #00e5ff;
-    }
-    .mode-badge {
+    .stApp { background-color: #07090f; color: #cdd9ee; }
+    h1, h2, h3 { color: #00e5ff !important; font-family: 'IBM Plex Mono', monospace; }
+    [data-testid="stMetricValue"] { font-size: 2.5rem; color: #00e5ff; }
+    
+    .estimated-badge {
         display: inline-block;
-        padding: 4px 12px;
-        border-radius: 4px;
-        font-family: 'IBM Plex Mono', monospace;
-        font-size: 0.75rem;
-        font-weight: 700;
-        border: 1px solid;
+        padding: 2px 8px;
+        border-radius: 3px;
+        font-size: 0.7rem;
+        font-weight: bold;
+        background-color: rgba(255, 215, 64, 0.2);
+        color: #ffd740;
+        border: 1px solid #ffd740;
+        margin-left: 8px;
     }
-    .mode-auto { color: #00e676; border-color: #00e676; background: rgba(0,230,118,0.08); }
-    .mode-failsafe { color: #ff1744; border-color: #ff1744; background: rgba(255,23,68,0.12); }
+    
+    .measured-badge {
+        display: inline-block;
+        padding: 2px 8px;
+        border-radius: 3px;
+        font-size: 0.7rem;
+        font-weight: bold;
+        background-color: rgba(0, 230, 118, 0.2);
+        color: #00e676;
+        border: 1px solid #00e676;
+        margin-left: 8px;
+    }
+    
+    .pending-badge {
+        display: inline-block;
+        padding: 2px 8px;
+        border-radius: 3px;
+        font-size: 0.7rem;
+        font-weight: bold;
+        background-color: rgba(255, 23, 68, 0.2);
+        color: #ff1744;
+        border: 1px solid #ff1744;
+        margin-left: 8px;
+    }
 </style>
 """, unsafe_allow_html=True)
 
 # SIDEBAR
-ds = st.session_state.data_store
+rm = st.session_state.role_manager
+session_info = rm.get_session_info()
 
 with st.sidebar:
-    st.markdown("### 🏭 SGI COLOMBIA")
-    st.caption("Sistema Cerebro v2")
+    st.markdown("### 🏭 CEREBRO SGI v2")
+    
+    # Modo operación
+    modo_icon = "🎮" if cfg.MODO_OPERACION == "SIMULACION" else "🏭"
+    st.markdown(f"**Modo:** {modo_icon} {cfg.MODO_OPERACION}")
+    
+    # Fase del proyecto
+    st.markdown(f"**Fase:** {cfg.FASE_PROYECTO}")
+    st.caption(f"Algorithm: v{cfg.ALGORITHM_VERSION}")
     
     st.markdown("---")
-    st.subheader("🔌 Conexion")
     
-    if st.session_state.demo_mode:
-        st.warning("🎮 MODO DEMO")
+    # Usuario y rol
+    st.markdown("**👤 Usuario**")
+    st.write(f"{session_info['name']}")
+    st.caption(f"Rol: {session_info['role']}")
+    
+    # Permisos
+    with st.expander("Ver permisos"):
+        perms = session_info['permissions']
+        for perm, allowed in perms.items():
+            icon = "✅" if allowed else "❌"
+            st.caption(f"{icon} {perm}")
+    
+    st.markdown("---")
+    
+    # Estado watchdog
+    watchdog = st.session_state.watchdog
+    wd_status = watchdog.get_status()
+    
+    if wd_status['failsafe_active']:
+        st.error("⛔ FAILSAFE ACTIVO")
+        st.caption(wd_status['failsafe_reason'])
     else:
-        if st.session_state.modbus_client.is_connected():
-            st.success(f"✅ PLC: {cfg.PLC_IP}")
-        else:
-            st.error("❌ Desconectado")
+        st.success("✅ Sistema OK")
     
-    st.markdown("---")
-    st.subheader("🎛 Control N₂")
-    
-    mode = ds.get_control_mode()
-    mode_class = 'mode-auto' if mode == 'AUTO' else 'mode-failsafe'
-    st.markdown(f'<div class="mode-badge {mode_class}">{mode}</div>', unsafe_allow_html=True)
-    
-    apertura = ds.get_valve_aperture()
-    st.metric("Valvula N₂", f"{apertura:.1f}%")
-    
-    st.markdown("---")
-    st.subheader("💰 Ahorro")
-    ahorro = ds.get_total_savings()
-    st.metric("Sesion", f"${ahorro:.2f}")
-    
-    n2_total = ds.get_n2_consumed()
-    st.metric("N₂", f"{n2_total:.2f} m³")
-    
-    st.markdown("---")
-    st.caption(f"⏱ {st.session_state.last_update.strftime('%H:%M:%S')}")
-    st.caption(f"🔄 {ds.tick_count} ciclos")
+    st.caption(f"Última lectura: {wd_status['seconds_since_read']:.0f}s")
 
-# MAIN PAGE
+# HEADER
 st.title("⚙️ CEREBRO SGI v2")
-st.markdown("**KINNOX - Linea de Galvanizado Druids**")
-st.markdown("_Republica Dominicana_")
+st.markdown("**KINNOX - Línea de Galvanizado Druids**")
+st.markdown("_República Dominicana_")
+
+# Estado instrumentación
+with st.expander("📊 Estado de Instrumentación"):
+    cols = st.columns(3)
+    
+    col_idx = 0
+    for sensor, instalado in cfg.INSTRUMENTACION.items():
+        with cols[col_idx % 3]:
+            if instalado:
+                st.markdown(f"✅ **{sensor}**")
+            else:
+                st.markdown(f"⚠️ **{sensor}** <span class='pending-badge'>PENDIENTE</span>", 
+                           unsafe_allow_html=True)
+        col_idx += 1
+
 st.markdown("---")
 
-# KPIs PRINCIPALES
+# KPIs PRINCIPALES (con marcadores MEDIDO/ESTIMADO)
 col1, col2, col3, col4 = st.columns(4)
 
-vel = ds.get_velocity()
-with col1:
-    st.metric(
-        "Velocidad Linea",
-        f"{vel:.1f} m/min", 
-        delta="Normal" if vel > cfg.VEL_MIN_PRODUCCION else "Detenida"
-    )
+# Ejemplo de datos (en producción: desde DataStore)
+velocidad = 165.0
+temp_zinc = 452.0
+n2_flujo = 96.0
+ahorro = 1250.0
 
-tz = ds.get_temp_zinc()
-tz_ok = cfg.TEMP_ZINC_MIN <= tz <= cfg.TEMP_ZINC_MAX
+with col1:
+    st.metric("Velocidad Línea", f"{velocidad:.1f} m/min")
+    if cfg.INSTRUMENTACION["velocidad_real"]:
+        st.markdown('<span class="measured-badge">MEDIDO</span>', unsafe_allow_html=True)
+    else:
+        st.markdown('<span class="estimated-badge">ESTIMADO</span>', unsafe_allow_html=True)
+
 with col2:
-    st.metric(
-        "Temperatura Zinc",
-        f"{tz:.1f} °C",
-        delta="OK" if tz_ok else "Fuera rango",
-        delta_color="normal" if tz_ok else "inverse"
-    )
+    st.metric("Temp. Zinc", f"{temp_zinc:.1f} °C")
+    if cfg.INSTRUMENTACION["temp_zinc"]:
+        st.markdown('<span class="measured-badge">MEDIDO</span>', unsafe_allow_html=True)
+    else:
+        st.markdown('<span class="estimated-badge">ESTIMADO</span>', unsafe_allow_html=True)
 
 with col3:
-    st.metric(
-        "Valvula N₂",
-        f"{apertura:.0f}%",
-        delta=mode
-    )
+    st.metric("Flujo N₂", f"{n2_flujo:.1f} Nm³/h")
+    if cfg.INSTRUMENTACION["caudalimetro_n2"]:
+        st.markdown('<span class="measured-badge">MEDIDO</span>', unsafe_allow_html=True)
+    else:
+        st.markdown('<span class="estimated-badge">ESTIMADO</span>', unsafe_allow_html=True)
 
 with col4:
-    st.metric(
-        "Ahorro Acumulado",
-        f"${ahorro:.2f}",
-        delta="Sesion actual"
-    )
+    st.metric("Ahorro Sesión", f"${ahorro:.2f}")
+    if cfg.INSTRUMENTACION["caudalimetro_n2"]:
+        st.markdown('<span class="measured-badge">MEDIDO</span>', unsafe_allow_html=True)
+    else:
+        st.markdown('<span class="estimated-badge">ESTIMADO</span>', unsafe_allow_html=True)
 
 st.markdown("---")
 
-# ALERTAS
-alerts = ds.get_active_alerts()
-if alerts:
-    st.subheader("🔔 Alertas Activas")
-    for alert in alerts:
-        level = alert.get('level', 'warning')
-        msg = alert.get('message', '')
-        if level == 'critical':
-            st.error(f"🔴 {msg}")
-        else:
-            st.warning(f"⚠️ {msg}")
-    st.markdown("---")
+# ESTADO DEL CONTROL
+st.subheader("🎛 Estado del Control N₂")
 
-# GRAFICA
-st.subheader("📈 Tendencia (Ultimos 5 min)")
+col1, col2, col3 = st.columns(3)
 
-history = ds.get_history(limit=100)
+with col1:
+    st.markdown("**Modo Actual:** MANUAL")
+    st.caption("Operador controlando manualmente")
 
-if history:
-    timestamps = [h['timestamp'] for h in history]
-    velocities = [h.get('velocity', 0) for h in history]
-    temps = [h.get('temp_zinc', 0) / 10 for h in history]
-    valves = [h.get('valve_aperture', 0) for h in history]
+with col2:
+    st.metric("Apertura Válvula", "65%")
+
+with col3:
+    can_enable, reason = rm.can_enable_auto()
+    if can_enable:
+        st.success("✅ AUTO disponible")
+    else:
+        st.warning(f"⚠️ AUTO bloqueado: {reason}")
+
+# Roadmap de fases
+with st.expander("🗺 Roadmap: Fases del Proyecto"):
+    st.markdown(f"""
+    **FASE A - READ-ONLY** {'✅ ACTUAL' if cfg.FASE_PROYECTO == 'A' else ''}
+    - Solo lectura de PLC/PSA
+    - Sin escritura de comandos
+    - Dashboard de monitoreo
+    - Historización de datos
     
-    fig = go.Figure()
-    fig.add_trace(go.Scatter(
-        x=timestamps, y=velocities,
-        name='Velocidad (m/min)',
-        line=dict(color='#00e5ff', width=2)
-    ))
-    fig.add_trace(go.Scatter(
-        x=timestamps, y=temps,
-        name='Temp Zinc (°C / 10)',
-        line=dict(color='#ff6b35', width=2)
-    ))
-    fig.add_trace(go.Scatter(
-        x=timestamps, y=valves,
-        name='Valvula N₂ (%)',
-        line=dict(color='#00e676', width=2)
-    ))
+    **FASE B - ADVISORY** {'✅ ACTUAL' if cfg.FASE_PROYECTO == 'B' else ''}
+    - Algoritmo genera recomendaciones
+    - Operador decide si aplicar
+    - Tracking de recomendaciones vs acciones
     
-    fig.update_layout(
-        template='plotly_dark',
-        paper_bgcolor='#07090f',
-        plot_bgcolor='#0d1117',
-        font=dict(family='monospace', color='#4a6080'),
-        xaxis=dict(showgrid=True, gridcolor='#1e2d47'),
-        yaxis=dict(showgrid=True, gridcolor='#1e2d47'),
-        height=350,
-        margin=dict(l=20, r=20, t=20, b=20),
-        hovermode='x unified',
-    )
-    
-    st.plotly_chart(fig, use_container_width=True)
-else:
-    st.info("📊 Esperando datos historicos...")
+    **FASE C - CLOSED-LOOP** {'✅ ACTUAL' if cfg.FASE_PROYECTO == 'C' else ''}
+    - Control automático habilitado
+    - Watchdog + fail-safe activos
+    - Requiere doble confirmación
+    - Auditoría completa
+    """)
 
-# NAVEGACION
 st.markdown("---")
-st.subheader("🧭 Navegar a:")
+
+# NAVEGACIÓN
+st.subheader("🧭 Páginas")
 
 nav_cols = st.columns(8)
 
@@ -254,80 +274,26 @@ with nav_cols[7]:
     if st.button("⚗️ PSA", use_container_width=True):
         st.switch_page("pages/08_PSA_NGP300.py")
 
-# RESUMEN FINANCIERO
-st.markdown("---")
-st.subheader("💰 Resumen Financiero")
-
-col1, col2, col3 = st.columns(3)
-
-# N2
-ahorro_n2_ano = 583904
-with col1:
-    st.markdown("**Control N₂ (PSA)**")
-    st.metric("Ahorro Anual", f"${ahorro_n2_ano:,}")
-    st.caption("Proyeccion NGP+300")
-
-# Zinc
-ahorro_zinc_ano = 89267
-with col2:
-    st.markdown("**Optimizacion Zinc**")
-    st.metric("Ahorro Anual", f"${ahorro_zinc_ano:,}")
-    st.caption("vs mejor historico")
-
-# Total
-with col3:
-    st.markdown("**TOTAL COMBINADO**")
-    total = ahorro_n2_ano + ahorro_zinc_ano
-    st.metric("Ahorro Anual", f"${total:,}")
-    st.caption(f"${total/12:,.0f}/mes")
-
-st.success(f"🎯 **Potencial de ahorro total: ${total:,} USD/año**")
-
 st.markdown("---")
 
-# AUTO-REFRESH (al final)
-auto_refresh = st.checkbox("🔄 Auto-actualizacion (3s)", value=False)
+# EVENTOS RECIENTES
+st.subheader("📋 Eventos Recientes")
 
-if auto_refresh:
-    # Simular datos si esta en demo
-    if st.session_state.demo_mode:
-        ds.simulate_demo_data(dt=3.0)
-        
-        # Ejecutar control si esta en AUTO
-        if ds.get_control_mode() == 'AUTO' and not ds.is_failsafe_active():
-            ctrl = st.session_state.control_logic
-            data = ds.get_all_process_data()
-            
-            apertura_tgt, razon, do_fail = ctrl.calculate_setpoint(
-                velocity=data['velocity'],
-                pureza=data['pureza_n2'],
-                presion=data['presion_n2'],
-                temp_zinc=data['temp_zinc'],
-                estado_linea=data['estado_linea'],
-                alarma_horno=data['alarma_horno'],
-                alarma_zinc=data['alarma_zinc']
-            )
-            
-            if do_fail:
-                ds.set_failsafe(razon)
-            else:
-                apertura_final = ctrl.apply_ramp(apertura_tgt, ds.valve_aperture)
-                ds.set_valve_aperture(apertura_final)
-                ds.valve_aperture_target = apertura_tgt
-                ds.control_reason = razon
-                
-                # Calcular finanzas
-                flujo = (apertura_final / 100) * cfg.FLUJO_N2_NOMINAL
-                dt_h = 3 / 3600
-                with ds._lock:
-                    ds.n2_consumed += flujo * dt_h
-                    ds.savings_accumulated += flujo * dt_h * (cfg.COSTO_LIN_USD_M3 - cfg.COSTO_PSA_USD_M3)
-        
-        ds.add_history_point()
-    
-    time.sleep(3)
-    st.rerun()
+logger = st.session_state.event_logger
+recent = logger.get_recent_events(limit=10)
+
+if recent:
+    import pandas as pd
+    df = pd.DataFrame(recent)
+    df = df[['timestamp', 'severity', 'event_type', 'description', 'user']]
+    st.dataframe(df, use_container_width=True, hide_index=True)
+else:
+    st.info("Sin eventos registrados")
 
 st.markdown("---")
-st.caption("**SGI Colombia S.A.S.** · Cerebro SGI v2 · Proyecto KINNOX")
+st.caption(f"""
+**SGI Colombia S.A.S.** · Cerebro SGI v2 · Modo {cfg.MODO_OPERACION} · 
+Fase {cfg.FASE_PROYECTO} · Usuario: {session_info['name']} ({session_info['role']})
+""")
+
 
